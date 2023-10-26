@@ -1,6 +1,6 @@
 [package]
 name = "zki_sieve"
-version = "4.0.1"
+version = "5.0.0"
 authors = ["Aurélien Nicolas <aurel@qed-it.com>", "Michael Adjedj <michael@qed-it.com>", "Constance Beguier <constance@qed-it.com>"]
 license = "MIT"
 build = "build.rs"
