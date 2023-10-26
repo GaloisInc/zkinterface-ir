@@ -130,7 +130,7 @@ pub struct Validator {
 }
 
 /// A `ValidatorType` is similar to a `Type` except that the value in `Type::Field` is a `TypeElement` instead of a `Value`
-#[derive(Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Eq, PartialEq, Hash, PartialOrd, Ord, Debug)]
 pub enum ValidatorType {
     Field(TypeElement),
     PluginType(String, String, Vec<String>),
@@ -756,13 +756,13 @@ impl Validator {
         let mut private_count = BTreeMap::new();
         for gate in subcircuit.iter() {
             match gate {
-                Gate::Public(type_id, _) => {
+                Gate::Public(type_id, out) => {
                     let count = public_count.entry(*type_id).or_insert(0);
-                    *count += 1;
+                    *count += (out.last_id + 1).saturating_sub(out.first_id);
                 }
-                Gate::Private(type_id, _) => {
+                Gate::Private(type_id, out) => {
                     let count = private_count.entry(*type_id).or_insert(0);
-                    *count += 1;
+                    *count += (out.last_id + 1).saturating_sub(out.first_id);
                 }
                 Gate::Call(name, _, _) => {
                     let function_counts_result =
