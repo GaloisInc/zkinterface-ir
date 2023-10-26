@@ -433,8 +433,46 @@ impl Validator {
 
             Copy(type_id, out, inp) => {
                 self.ensure_field_type(type_id);
-                self.ensure_defined_and_set(type_id, *inp);
-                self.ensure_undefined_not_deleted_and_set(type_id, *out);
+
+                let mut total_inputs = 0;
+                for inp_range in inp {
+                    self.check_wire_range(inp_range);
+                    // Ensure inputs are already set
+                    (inp_range.first_id..=inp_range.last_id).for_each(|wire_id| {
+                        self.ensure_defined_and_set(type_id, wire_id);
+                    });
+                    // Ensure inputs belong to a single allocation
+                    if !self.belong_to_a_single_allocation(type_id, &inp_range.first_id, &inp_range.last_id) {
+                        self.violate("Gate::Copy: input range spans multiple allocations")
+                    }
+                    total_inputs += (inp_range.last_id + 1).saturating_sub(inp_range.first_id);
+                }
+
+                self.check_wire_range(out);
+                let total_outputs = (out.last_id + 1).saturating_sub(out.first_id);
+                if total_outputs != total_inputs {
+                    self.violate("Gate::Convert: output count does not match input count");
+                }
+
+                // Ensure that output wires are unset, have not already been deleted and set them
+                (out.first_id..=out.last_id).for_each(|wire_id| {
+                    self.ensure_undefined_not_deleted_and_set(type_id, wire_id)
+                });
+
+                // Check that all outputs belong to a single allocation or no output belongs to an allocation
+                // If no output belongs to allocations, add this output WireRange to the list of allocations
+                // If outputs belong to different allocations, we have a violation
+                if !self.belong_to_a_single_allocation(type_id, &out.first_id, &out.last_id) {
+                    if self.belong_to_allocations(type_id, &out.first_id, &out.last_id) {
+                        self.violate(
+                            "Gate::Convert: outputs should not belong to different allocations)",
+                        )
+                    } else {
+                        // No output belongs to allocations
+                        self.allocations
+                            .insert((*type_id, out.first_id, out.last_id));
+                    }
+                }
             }
 
             Add(type_id, out, left, right) => {
@@ -472,15 +510,19 @@ impl Validator {
             }
 
             Public(type_id, out) => {
-                self.ensure_undefined_not_deleted_and_set(type_id, *out);
-                // Consume value.
-                self.consume_public_inputs(type_id, 1);
+                (out.first_id..=out.last_id).for_each(|wire_id| {
+                    self.ensure_undefined_not_deleted_and_set(type_id, wire_id);
+                    // Consume value.
+                    self.consume_public_inputs(type_id, 1);
+                });
             }
 
             Private(type_id, out) => {
-                self.ensure_undefined_not_deleted_and_set(type_id, *out);
-                // Consume value.
-                self.consume_private_inputs(type_id, 1);
+                (out.first_id..=out.last_id).for_each(|wire_id| {
+                    self.ensure_undefined_not_deleted_and_set(type_id, wire_id);
+                    // Consume value.
+                    self.consume_private_inputs(type_id, 1);
+                });
             }
 
             New(type_id, first, last) => {
@@ -548,6 +590,7 @@ impl Validator {
                 in_type_id,
                 in_first_id,
                 in_last_id,
+                _modulus,
             ) => {
                 self.ensure_field_type(out_type_id);
                 self.ensure_field_type(in_type_id);
@@ -1240,11 +1283,11 @@ fn test_validator_violations() {
         types: vec![Type::Field(vec![7])],
         conversions: vec![],
         directives: vec![
-            Directive::Gate(Gate::Private(0, 0)),
+            Directive::Gate(Gate::Private(0, WireRange::singleton(0))),
             // Create a violation by omitting a private input value.
-            Directive::Gate(Gate::Private(0, 1)),
+            Directive::Gate(Gate::Private(0, WireRange::singleton(1))),
             // Consume all public inputs
-            Directive::Gate(Gate::Public(0, 2)),
+            Directive::Gate(Gate::Public(0, WireRange::singleton(2))),
         ],
     };
 
@@ -1421,14 +1464,14 @@ fn test_validator_convert_violations() {
         types: vec![Type::Field(vec![7]), Type::Field(vec![101])],
         conversions: vec![Conversion::new(Count::new(1, 1), Count::new(0, 1))],
         directives: vec![
-            Directive::Gate(Gate::Public(0, 0)),
+            Directive::Gate(Gate::Public(0, WireRange::singleton(0))),
             // Violation: in_ids is empty (in_first_id > in_last_id)
-            Directive::Gate(Gate::Convert(1, 0, 0, 0, 1, 0)),
+            Directive::Gate(Gate::Convert(1, 0, 0, 0, 1, 0, false)),
             Directive::Gate(Gate::Delete(0, 0, 0)),
             // Violation: use an undeclared conversion
-            Directive::Gate(Gate::Private(1, 10)),
+            Directive::Gate(Gate::Private(1, WireRange::singleton(10))),
             // Violation: use an undeclared conversion
-            Directive::Gate(Gate::Convert(0, 10, 10, 1, 10, 10)),
+            Directive::Gate(Gate::Convert(0, 10, 10, 1, 10, 10, false)),
             Directive::Gate(Gate::Delete(1, 10, 10)),
             Directive::Gate(Gate::Delete(0, 10, 10)),
         ],
@@ -1495,10 +1538,10 @@ fn test_validator_with_functions_with_several_input_output_types() {
         directives: vec![
             Directive::Gate(Gate::New(0, 0, 1)),
             Directive::Gate(Gate::New(1, 0, 1)),
-            Directive::Gate(Gate::Public(0, 0)),
-            Directive::Gate(Gate::Public(0, 1)),
-            Directive::Gate(Gate::Private(1, 0)),
-            Directive::Gate(Gate::Private(1, 1)),
+            Directive::Gate(Gate::Public(0, WireRange::singleton(0))),
+            Directive::Gate(Gate::Public(0, WireRange::singleton(1))),
+            Directive::Gate(Gate::Private(1, WireRange::singleton(0))),
+            Directive::Gate(Gate::Private(1, WireRange::singleton(1))),
             Directive::Function(Function::new(
                 "custom".to_string(),
                 vec![Count::new(0, 1), Count::new(1, 1)],
@@ -1507,11 +1550,11 @@ fn test_validator_with_functions_with_several_input_output_types() {
                     // 3 + 5 = 1 mod 7
                     Gate::Add(0, 3, 1, 2),
                     // 1 mod 7 -> 1 mod 101
-                    Gate::Convert(1, 0, 0, 0, 3, 3),
+                    Gate::Convert(1, 0, 0, 0, 3, 3, false),
                     // 10 + 20 = 30 mod 101
                     Gate::Add(1, 3, 1, 2),
                     // 30 mod 101 -> 2 mod 7
-                    Gate::Convert(0, 0, 0, 1, 3, 3),
+                    Gate::Convert(0, 0, 0, 1, 3, 3, false),
                 ]),
             )),
             Directive::Gate(Gate::Call(
@@ -1519,10 +1562,10 @@ fn test_validator_with_functions_with_several_input_output_types() {
                 vec![WireRange::new(2, 2), WireRange::new(2, 2)],
                 vec![WireRange::new(0, 1), WireRange::new(0, 1)],
             )),
-            Directive::Gate(Gate::Public(0, 3)),
+            Directive::Gate(Gate::Public(0, WireRange::singleton(3))),
             Directive::Gate(Gate::Add(0, 4, 2, 3)),
             Directive::Gate(Gate::AssertZero(0, 4)),
-            Directive::Gate(Gate::Private(1, 3)),
+            Directive::Gate(Gate::Private(1, WireRange::singleton(3))),
             Directive::Gate(Gate::Add(1, 4, 2, 3)),
             Directive::Gate(Gate::AssertZero(1, 4)),
             Directive::Gate(Gate::Delete(0, 0, 4)),
@@ -1599,11 +1642,11 @@ fn test_validator_with_custom_functions() {
             )),
             Directive::Gate(Gate::New(0, 0, 2)),
             Directive::Gate(Gate::New(1, 0, 1)),
-            Directive::Gate(Gate::Private(0, 0)), // 0
-            Directive::Gate(Gate::Private(0, 1)), // 1
-            Directive::Gate(Gate::Private(0, 2)), // 2
-            Directive::Gate(Gate::Private(1, 0)), // 3
-            Directive::Gate(Gate::Private(1, 1)), // 4
+            Directive::Gate(Gate::Private(0, WireRange::singleton(0))), // 0
+            Directive::Gate(Gate::Private(0, WireRange::singleton(1))), // 1
+            Directive::Gate(Gate::Private(0, WireRange::singleton(2))), // 2
+            Directive::Gate(Gate::Private(1, WireRange::singleton(0))), // 3
+            Directive::Gate(Gate::Private(1, WireRange::singleton(1))), // 4
             Directive::Gate(Gate::Call(
                 "add_1".to_string(),
                 vec![WireRange::new(3, 5), WireRange::new(2, 3)], // [1, 2, 3], [4, 5]
@@ -1611,12 +1654,12 @@ fn test_validator_with_custom_functions() {
             )),
             Directive::Gate(Gate::Add(0, 6, 3, 4)), // 1 + 2 = 3
             Directive::Gate(Gate::Add(0, 7, 5, 6)), // 3 + 3 = 6
-            Directive::Gate(Gate::Public(0, 8)),    // 1
+            Directive::Gate(Gate::Public(0, WireRange::singleton(8))),    // 1
             Directive::Gate(Gate::Add(0, 9, 7, 8)), // 6 + 1 = 0 mod 7
             Directive::Gate(Gate::AssertZero(0, 9)),
             Directive::Gate(Gate::Delete(0, 0, 9)),
             Directive::Gate(Gate::Add(1, 4, 2, 3)), // 4 + 5 = 9
-            Directive::Gate(Gate::Public(1, 5)),    // 92
+            Directive::Gate(Gate::Public(1, WireRange::singleton(5))),    // 92
             Directive::Gate(Gate::Add(1, 6, 4, 5)), // 92 + 9 = 0 mod 101
             Directive::Gate(Gate::AssertZero(1, 6)),
             Directive::Gate(Gate::Delete(1, 0, 6)),
@@ -1655,10 +1698,10 @@ fn test_validator_with_custom_functions() {
                 vec![Count::new(0, 4)],
                 vec![Count::new(0, 2)],
                 FunctionBody::Gates(vec![
-                    Gate::Copy(0, 0, 4),
-                    Gate::Copy(0, 1, 5),
-                    Gate::Copy(0, 2, 4),
-                    Gate::Copy(0, 3, 5),
+                    Gate::Copy(0, WireRange::singleton(0), vec![WireRange::singleton(4)]),
+                    Gate::Copy(0, WireRange::singleton(1), vec![WireRange::singleton(5)]),
+                    Gate::Copy(0, WireRange::singleton(2), vec![WireRange::singleton(4)]),
+                    Gate::Copy(0, WireRange::singleton(3), vec![WireRange::singleton(5)]),
                 ]),
             )),
             Directive::Function(Function::new(
@@ -1674,8 +1717,8 @@ fn test_validator_with_custom_functions() {
                 )]),
             )),
             Directive::Gate(Gate::New(0, 0, 2)),
-            Directive::Gate(Gate::Private(0, 0)), // 0
-            Directive::Gate(Gate::Private(0, 1)), // 1
+            Directive::Gate(Gate::Private(0, WireRange::singleton(0))), // 0
+            Directive::Gate(Gate::Private(0, WireRange::singleton(1))), // 1
             Directive::Gate(Gate::Call(
                 "duplicate_2".to_string(),
                 vec![WireRange::new(2, 3), WireRange::new(4, 5)], // [0, 1], [0, 1]
@@ -1684,7 +1727,7 @@ fn test_validator_with_custom_functions() {
             Directive::Gate(Gate::Add(0, 6, 2, 3)), // 0 + 1 = 1
             Directive::Gate(Gate::Add(0, 7, 4, 5)), // 0 + 1 = 1
             Directive::Gate(Gate::Add(0, 8, 6, 7)), // 1 + 1 = 2
-            Directive::Gate(Gate::Public(0, 9)),    // 5
+            Directive::Gate(Gate::Public(0, WireRange::singleton(9))),    // 5
             Directive::Gate(Gate::Add(0, 10, 8, 9)), // 2 + 5 = 0 mod 7
             Directive::Gate(Gate::AssertZero(0, 10)),
             Directive::Gate(Gate::Delete(0, 0, 10)),
@@ -1732,9 +1775,9 @@ fn test_validator_with_new_delete_on_one_wire() {
         conversions: vec![],
         directives: vec![
             Directive::Gate(Gate::New(0, 0, 0)),
-            Directive::Gate(Gate::Public(0, 0)),
+            Directive::Gate(Gate::Public(0, WireRange::singleton(0))),
             Directive::Gate(Gate::New(0, 1, 1)),
-            Directive::Gate(Gate::Private(0, 1)),
+            Directive::Gate(Gate::Private(0, WireRange::singleton(1))),
             Directive::Gate(Gate::Add(0, 2, 0, 1)),
             Directive::Gate(Gate::Delete(0, 0, 0)),
             Directive::Gate(Gate::Delete(0, 1, 1)),

@@ -204,7 +204,7 @@ impl GateStats {
                 self.variables_deleted += *last - *first + 1;
             }
 
-            Convert(_, _, _, _, _, _) => {
+            Convert(_, _, _, _, _, _, _) => {
                 self.convert_gates += 1;
             }
 

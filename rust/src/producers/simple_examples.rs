@@ -57,9 +57,9 @@ pub fn simple_example_relation() -> Relation {
             )),
             // Right-triangle example
             Directive::Gate(New(type_id, 0, 2)),
-            Directive::Gate(Public(type_id, 0)),
-            Directive::Gate(Private(type_id, 1)),
-            Directive::Gate(Private(type_id, 2)),
+            Directive::Gate(Public(type_id, WireRange::singleton(0))),
+            Directive::Gate(Private(type_id, WireRange::singleton(1))),
+            Directive::Gate(Private(type_id, WireRange::singleton(2))),
             Directive::Gate(Call(
                 "square".to_string(),
                 vec![WireRange::new(3, 3)],
@@ -88,9 +88,12 @@ pub fn simple_example_relation() -> Relation {
 pub const EXAMPLE_MODULUS: u32 = 101;
 
 pub fn literal<T: EndianScalar>(value: T) -> Vec<u8> {
-    let mut buf = vec![0u8; size_of::<T>()];
-    emplace_scalar(&mut buf[..], value);
-    buf
+    unsafe {
+        let mut buf = vec![0u8; size_of::<T>()];
+        // Requires `buf.len() >= size_of::<T>()`.
+        emplace_scalar(&mut buf[..], value);
+        buf
+    }
 }
 
 pub fn literal32(v: u32) -> Vec<u8> {
@@ -98,12 +101,16 @@ pub fn literal32(v: u32) -> Vec<u8> {
 }
 
 pub fn read_literal<T: EndianScalar>(encoded: &[u8]) -> T {
-    if encoded.len() >= size_of::<T>() {
-        read_scalar(encoded)
-    } else {
-        let mut encoded = Vec::from(encoded);
-        encoded.resize(size_of::<T>(), 0);
-        read_scalar(&encoded)
+    unsafe {
+        if encoded.len() >= size_of::<T>() {
+            // Requires `encoded.len() >= size_of::<T>()`.
+            read_scalar(encoded)
+        } else {
+            let mut encoded = Vec::from(encoded);
+            encoded.resize(size_of::<T>(), 0);
+            // Requires `encoded.len() >= size_of::<T>()`.
+            read_scalar(&encoded)
+        }
     }
 }
 

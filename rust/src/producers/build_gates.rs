@@ -32,13 +32,17 @@ impl BuildGate {
                 assert_eq!(output, NO_OUTPUT);
                 Gate::AssertZero(type_id, input)
             }
-            Copy(type_id, input) => Gate::Copy(type_id, output, input),
+            Copy(type_id, input) => Gate::Copy(
+                type_id,
+                WireRange::singleton(output),
+                vec![WireRange::singleton(input)],
+            ),
             Add(type_id, left, right) => Gate::Add(type_id, output, left, right),
             Mul(type_id, left, right) => Gate::Mul(type_id, output, left, right),
             AddConstant(type_id, left, value) => Gate::AddConstant(type_id, output, left, value),
             MulConstant(type_id, left, value) => Gate::MulConstant(type_id, output, left, value),
-            Public(type_id, _) => Gate::Public(type_id, output),
-            Private(type_id, _) => Gate::Private(type_id, output),
+            Public(type_id, _) => Gate::Public(type_id, WireRange::singleton(output)),
+            Private(type_id, _) => Gate::Private(type_id, WireRange::singleton(output)),
             New(type_id, first, last) => {
                 assert_eq!(output, NO_OUTPUT);
                 Gate::New(type_id, first, last)
@@ -101,6 +105,7 @@ impl BuildComplexGate {
                     in_type_id,
                     in_first_id,
                     in_last_id,
+                    false,
                 )
             }
         }

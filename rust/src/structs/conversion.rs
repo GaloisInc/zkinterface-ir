@@ -42,7 +42,7 @@ impl Conversion {
     }
 
     /// Import a vector of binary Conversion into a Rust vector of Conversion declarations.
-    pub fn try_from_vector(g_conversions: &[generated::Conversion]) -> Result<Vec<Conversion>> {
+    pub fn try_from_vector(g_conversions: Vector<generated::Conversion>) -> Result<Vec<Conversion>> {
         g_conversions
             .iter()
             .map(|conversion| Conversion::try_from(*conversion))

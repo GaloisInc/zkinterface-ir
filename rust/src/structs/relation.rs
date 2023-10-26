@@ -50,7 +50,7 @@ impl<'a> TryFrom<&'a [u8]> for Relation {
 
     fn try_from(buffer: &'a [u8]) -> Result<Relation> {
         Relation::try_from(
-            generated::get_size_prefixed_root_as_root(buffer)
+            generated::size_prefixed_root_as_root(buffer)?
                 .message_as_relation()
                 .ok_or("Not a Relation message.")?,
         )

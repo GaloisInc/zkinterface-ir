@@ -20,7 +20,6 @@ impl<'a> TryFrom<generated::Type<'a>> for Type {
     /// Convert from Flatbuffers references to owned structure.
     fn try_from(g_type: generated::Type) -> Result<Type> {
         let type_ = match g_type.element_type() {
-            generated::TypeU::NONE => return Err("Unknown type".into()),
             generated::TypeU::Field => {
                 let value = try_from_value(
                     g_type
@@ -43,6 +42,7 @@ impl<'a> TryFrom<generated::Type<'a>> for Type {
                 let params = g_params.iter().map(|param| param.to_string()).collect();
                 Type::PluginType(name.to_string(), operation.to_string(), params)
             }
+            _ => return Err("Unknown type".into()),
         };
         Ok(type_)
     }

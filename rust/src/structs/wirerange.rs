@@ -30,13 +30,17 @@ impl WireRange {
         WireRange { first_id, last_id }
     }
 
+    pub fn singleton(wire_id: WireId) -> Self {
+        Self::new(wire_id, wire_id)
+    }
+
     /// Serialize this structure into a Flatbuffer message
     pub fn build(&self) -> generated::WireRange {
         generated::WireRange::new(self.first_id, self.last_id)
     }
 
     /// Import a vector of binary WireRange into a Rust vector of WireRange declarations.
-    pub fn try_from_vector(g_wire_ranges: &[generated::WireRange]) -> Result<Vec<WireRange>> {
+    pub fn try_from_vector(g_wire_ranges: Vector<generated::WireRange>) -> Result<Vec<WireRange>> {
         g_wire_ranges
             .iter()
             .map(|g_wire_range| WireRange::try_from(*g_wire_range))

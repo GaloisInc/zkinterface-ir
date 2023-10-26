@@ -20,7 +20,6 @@ impl<'a> TryFrom<generated::Directive<'a>> for Directive {
     /// Convert from Flatbuffers references to owned structure.
     fn try_from(g_directive: generated::Directive) -> Result<Directive> {
         let directive = match g_directive.directive_type() {
-            generated::DirectiveSet::NONE => return Err("Unknown directive".into()),
             generated::DirectiveSet::Function => {
                 let function = Function::try_from(g_directive.directive_as_function().unwrap())?;
                 Directive::Function(function)
@@ -29,6 +28,7 @@ impl<'a> TryFrom<generated::Directive<'a>> for Directive {
                 let gate = Gate::try_from(g_directive.directive_as_gate().unwrap())?;
                 Directive::Gate(gate)
             }
+            _ => return Err("Unknown directive".into()),
         };
         Ok(directive)
     }

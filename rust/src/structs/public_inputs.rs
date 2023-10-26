@@ -39,7 +39,7 @@ impl<'a> TryFrom<&'a [u8]> for PublicInputs {
 
     fn try_from(buffer: &'a [u8]) -> Result<PublicInputs> {
         PublicInputs::try_from(
-            generated::get_size_prefixed_root_as_root(buffer)
+            generated::size_prefixed_root_as_root(buffer)?
                 .message_as_public_inputs()
                 .ok_or("Not a PublicInputs message.")?,
         )

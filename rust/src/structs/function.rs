@@ -53,7 +53,6 @@ impl<'a> TryFrom<generated::Function<'a>> for Function {
 
         let g_body_type = g_function.body_type();
         let body = match g_body_type {
-            generated::FunctionBody::NONE => return Err("Unknown type in FunctionBody".into()),
             generated::FunctionBody::Gates => {
                 let g_gates = g_function.body_as_gates().unwrap();
                 FunctionBody::Gates(Gate::try_from_vector(
@@ -64,6 +63,7 @@ impl<'a> TryFrom<generated::Function<'a>> for Function {
                 let plugin_body = g_function.body_as_plugin_body().unwrap();
                 FunctionBody::PluginBody(PluginBody::try_from(plugin_body)?)
             }
+            _ => return Err("Unknown type in FunctionBody".into()),
         };
 
         Ok(Function {

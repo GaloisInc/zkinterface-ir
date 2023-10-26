@@ -19,7 +19,7 @@ pub enum Gate {
     /// AssertZero(type_id, input)
     AssertZero(TypeId, WireId),
     /// Copy(type_id, output, input)
-    Copy(TypeId, WireId, WireId),
+    Copy(TypeId, WireRange, Vec<WireRange>),
     /// Add(type_id, output, input, input)
     Add(TypeId, WireId, WireId, WireId),
     /// Mul(type_id, output, input, input)
@@ -29,9 +29,9 @@ pub enum Gate {
     /// MulConstant(type_id, output, input, constant)
     MulConstant(TypeId, WireId, WireId, Value),
     /// Public(type_id, output)
-    Public(TypeId, WireId),
+    Public(TypeId, WireRange),
     /// Private(type_id, output)
-    Private(TypeId, WireId),
+    Private(TypeId, WireRange),
     /// New(type_id, first, last)
     /// Allocate in a contiguous space all wires between the first and the last INCLUSIVE.
     New(TypeId, WireId, WireId),
@@ -39,8 +39,9 @@ pub enum Gate {
     /// All wires between the first and the last INCLUSIVE are deleted.
     /// Last could be equal to first when we would like to delete only one wire
     Delete(TypeId, WireId, WireId),
-    /// Convert(out_type_id, out_first_id, out_last_id, in_type_id, in_first_id, in_last_id)
-    Convert(TypeId, WireId, WireId, TypeId, WireId, WireId),
+    /// Convert(out_type_id, out_first_id, out_last_id, in_type_id, in_first_id, in_last_id,
+    /// modulus)
+    Convert(TypeId, WireId, WireId, TypeId, WireId, WireId, bool),
     /// GateCall(name, out_ids, in_ids)
     Call(String, Vec<WireRange>, Vec<WireRange>),
 }
@@ -53,14 +54,12 @@ impl<'a> TryFrom<generated::Gate<'a>> for Gate {
     /// Convert from Flatbuffers references to owned structure.
     fn try_from(gen_gate: generated::Gate) -> Result<Gate> {
         Ok(match gen_gate.gate_type() {
-            gs::NONE => return Err("No gate type".into()),
-
             gs::GateConstant => {
                 let gate = gen_gate.gate_as_gate_constant().unwrap();
                 Constant(
                     gate.type_id(),
                     gate.out_id(),
-                    Vec::from(gate.constant().ok_or("Missing constant")?),
+                    gate.constant().ok_or("Missing constant")?.iter().collect(),
                 )
             }
 
@@ -71,7 +70,11 @@ impl<'a> TryFrom<generated::Gate<'a>> for Gate {
 
             gs::GateCopy => {
                 let gate = gen_gate.gate_as_gate_copy().unwrap();
-                Copy(gate.type_id(), gate.out_id(), gate.in_id())
+                Copy(
+                    gate.type_id(),
+                    WireRange::try_from(*gate.out_id().ok_or("Missing out id")?)?,
+                    WireRange::try_from_vector(gate.in_id().ok_or("Missing in ids")?)?,
+                )
             }
 
             gs::GateAdd => {
@@ -100,7 +103,7 @@ impl<'a> TryFrom<generated::Gate<'a>> for Gate {
                     gate.type_id(),
                     gate.out_id(),
                     gate.in_id(),
-                    Vec::from(gate.constant().ok_or("Missing constant")?),
+                    gate.constant().ok_or("Missing constant")?.iter().collect(),
                 )
             }
 
@@ -110,18 +113,24 @@ impl<'a> TryFrom<generated::Gate<'a>> for Gate {
                     gate.type_id(),
                     gate.out_id(),
                     gate.in_id(),
-                    Vec::from(gate.constant().ok_or("Missing constant")?),
+                    gate.constant().ok_or("Missing constant")?.iter().collect(),
                 )
             }
 
             gs::GatePublic => {
                 let gate = gen_gate.gate_as_gate_public().unwrap();
-                Public(gate.type_id(), gate.out_id())
+                Public(
+                    gate.type_id(),
+                    WireRange::try_from(*gate.out_id().ok_or("Missing out id")?)?,
+                )
             }
 
             gs::GatePrivate => {
                 let gate = gen_gate.gate_as_gate_private().unwrap();
-                Private(gate.type_id(), gate.out_id())
+                Private(
+                    gate.type_id(),
+                    WireRange::try_from(*gate.out_id().ok_or("Missing out id")?)?,
+                )
             }
 
             gs::GateNew => {
@@ -143,6 +152,7 @@ impl<'a> TryFrom<generated::Gate<'a>> for Gate {
                     gate.in_type_id(),
                     gate.in_first_id(),
                     gate.in_last_id(),
+                    gate.modulus(),
                 )
             }
 
@@ -155,6 +165,8 @@ impl<'a> TryFrom<generated::Gate<'a>> for Gate {
                     WireRange::try_from_vector(gate.in_ids().ok_or("Missing in ids")?)?,
                 )
             }
+
+            _ => return Err("Invalid gate type".into()),
         })
     }
 }
@@ -201,12 +213,14 @@ impl Gate {
             }
 
             Copy(type_id, output, input) => {
+                let g_output = output.build();
+                let g_input = WireRange::build_vector(builder, input);
                 let gate = generated::GateCopy::create(
                     builder,
                     &generated::GateCopyArgs {
                         type_id: *type_id,
-                        out_id: *output,
-                        in_id: *input,
+                        out_id: Some(&g_output),
+                        in_id: Some(g_input),
                     },
                 );
                 generated::Gate::create(
@@ -297,11 +311,12 @@ impl Gate {
             }
 
             Public(type_id, output) => {
+                let g_output = output.build();
                 let gate = generated::GatePublic::create(
                     builder,
                     &generated::GatePublicArgs {
                         type_id: *type_id,
-                        out_id: *output,
+                        out_id: Some(&g_output),
                     },
                 );
                 generated::Gate::create(
@@ -314,11 +329,12 @@ impl Gate {
             }
 
             Private(type_id, output) => {
+                let g_output = output.build();
                 let gate = generated::GatePrivate::create(
                     builder,
                     &generated::GatePrivateArgs {
                         type_id: *type_id,
-                        out_id: *output,
+                        out_id: Some(&g_output),
                     },
                 );
                 generated::Gate::create(
@@ -375,6 +391,7 @@ impl Gate {
                 in_type_id,
                 in_first_id,
                 in_last_id,
+                modulus,
             ) => {
                 let gate = generated::GateConvert::create(
                     builder,
@@ -385,6 +402,7 @@ impl Gate {
                         in_type_id: *in_type_id,
                         in_first_id: *in_first_id,
                         in_last_id: *in_last_id,
+                        modulus: *modulus,
                     },
                 );
 
@@ -442,28 +460,6 @@ impl Gate {
         let g_gates: Vec<_> = gates.iter().map(|gate| gate.build(builder)).collect();
         builder.create_vector(&g_gates)
     }
-
-    /// Returns the output wire id if exists.
-    /// if not, returns None
-    fn _get_output_wire_id(&self) -> Option<WireId> {
-        match *self {
-            Constant(_, w, _) => Some(w),
-            Copy(_, w, _) => Some(w),
-            Add(_, w, _, _) => Some(w),
-            Mul(_, w, _, _) => Some(w),
-            AddConstant(_, w, _, _) => Some(w),
-            MulConstant(_, w, _, _) => Some(w),
-            Public(_, w) => Some(w),
-            Private(_, w) => Some(w),
-
-            AssertZero(_, _) => None,
-            Delete(_, _, _) => None,
-            New(_, _, _) => unimplemented!("New gate"),
-
-            Convert(_, _, _, _, _, _) => unimplemented!("Convert gate"),
-            Call(_, _, _) => unimplemented!("Call gate"),
-        }
-    }
 }
 
 /// replace_output_wires goes through all gates in `gates` and replace `output_wires[i]` by `i`.
@@ -481,6 +477,26 @@ pub fn replace_output_wires(
     let mut do_no_modify_wires: BTreeSet<(TypeId, WireId)> = BTreeSet::new();
     for gate in gates.iter() {
         match gate {
+            Copy(type_id, outputs, inputs) => {
+                for wire_id in outputs.first_id ..= outputs.last_id {
+                    do_no_modify_wires.insert((*type_id, wire_id));
+                }
+                for input_range in inputs {
+                    for wire_id in input_range.first_id ..= input_range.last_id {
+                        do_no_modify_wires.insert((*type_id, wire_id));
+                    }
+                }
+            }
+            Public(type_id, outputs) => {
+                for wire_id in outputs.first_id ..= outputs.last_id {
+                    do_no_modify_wires.insert((*type_id, wire_id));
+                }
+            }
+            Private(type_id, outputs) => {
+                for wire_id in outputs.first_id ..= outputs.last_id {
+                    do_no_modify_wires.insert((*type_id, wire_id));
+                }
+            }
             New(type_id, first_id, last_id) => {
                 for wire_id in *first_id..=*last_id {
                     do_no_modify_wires.insert((*type_id, wire_id));
@@ -513,6 +529,7 @@ pub fn replace_output_wires(
                 in_type_id,
                 in_first_id,
                 in_last_id,
+                _modulus,
             ) => {
                 (*out_first_id..=*out_last_id).for_each(|wire_id| {
                     do_no_modify_wires.insert((*out_type_id, wire_id));
@@ -535,7 +552,15 @@ pub fn replace_output_wires(
 
             // If the old_wire is in a wire range, we add a Copy gate and not modify this WireId in other gates.
             if do_no_modify_wires.contains(&(old_type_id, old_wire)) {
-                gates.push(Copy(old_type_id, new_wire, old_wire));
+                let output_range = WireRange {
+                    first_id: new_wire,
+                    last_id: new_wire,
+                };
+                let input_range = WireRange {
+                    first_id: old_wire,
+                    last_id: old_wire,
+                };
+                gates.push(Copy(old_type_id, output_range, vec![input_range]));
                 continue;
             }
 
@@ -543,10 +568,6 @@ pub fn replace_output_wires(
                 match gate {
                     Constant(ref type_id, ref mut output, _) => {
                         replace_wire_id(type_id, &old_type_id, output, old_wire, new_wire);
-                    }
-                    Copy(ref type_id, ref mut output, ref mut input) => {
-                        replace_wire_id(type_id, &old_type_id, output, old_wire, new_wire);
-                        replace_wire_id(type_id, &old_type_id, input, old_wire, new_wire);
                     }
                     Add(ref type_id, ref mut output, ref mut left, ref mut right) => {
                         replace_wire_id(type_id, &old_type_id, output, old_wire, new_wire);
@@ -566,12 +587,6 @@ pub fn replace_output_wires(
                         replace_wire_id(type_id, &old_type_id, output, old_wire, new_wire);
                         replace_wire_id(type_id, &old_type_id, input, old_wire, new_wire);
                     }
-                    Public(ref type_id, ref mut output) => {
-                        replace_wire_id(type_id, &old_type_id, output, old_wire, new_wire);
-                    }
-                    Private(ref type_id, ref mut output) => {
-                        replace_wire_id(type_id, &old_type_id, output, old_wire, new_wire);
-                    }
                     AssertZero(ref type_id, ref mut wire) => {
                         replace_wire_id(type_id, &old_type_id, wire, old_wire, new_wire);
                     }
@@ -580,8 +595,9 @@ pub fn replace_output_wires(
                             return Err("It is forbidden to delete an output wire !".into());
                         }
                     }
-                    // Convert, Call and New gates have already been treated at the beginning of the loop
-                    // by adding Copy gate if (old_type_id, old_wire) belongs to those gates.
+                    // Copy, Public, Private, Convert, Call and New gates have already been treated
+                    // at the beginning of the loop by adding Copy gate if (old_type_id, old_wire)
+                    // belongs to those gates.
                     _ => (),
                 }
             }
@@ -596,10 +612,10 @@ fn test_replace_output_wires() {
 
     let mut gates = vec![
         New(0, 4, 4),
-        Public(0, 4),
-        Private(0, 5),
+        Public(0, WireRange::singleton(4)),
+        Private(0, WireRange::singleton(5)),
         Constant(0, 6, vec![15]),
-        Public(1, 6),
+        Public(1, WireRange::singleton(6)),
         Add(0, 7, 4, 5),
         Delete(0, 4, 4),
         Mul(0, 8, 6, 7),
@@ -626,11 +642,11 @@ fn test_replace_output_wires() {
     replace_output_wires(&mut gates, &output_wires, &known_functions).unwrap();
     let correct_gates = vec![
         New(0, 4, 4),
-        Public(0, 4),
-        Private(0, 1),
+        Public(0, WireRange::singleton(4)),
+        Private(0, WireRange::singleton(5)),
         Constant(0, 2, vec![15]),
-        Public(1, 6),
-        Add(0, 7, 4, 1),
+        Public(1, WireRange::singleton(6)),
+        Add(0, 7, 4, 5),
         Delete(0, 4, 4),
         Mul(0, 8, 2, 7),
         Call(
@@ -639,8 +655,9 @@ fn test_replace_output_wires() {
             vec![WireRange::new(7, 8)],
         ),
         AssertZero(0, 12),
-        Copy(0, 0, 4),
-        Copy(0, 3, 12),
+        Copy(0, WireRange::singleton(0), vec![WireRange::singleton(4)]),
+        Copy(0, WireRange::singleton(1), vec![WireRange::singleton(5)]),
+        Copy(0, WireRange::singleton(3), vec![WireRange::singleton(12)]),
     ];
     assert_eq!(gates, correct_gates);
 }

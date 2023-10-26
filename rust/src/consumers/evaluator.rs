@@ -371,9 +371,15 @@ impl<B: ZKBackend> Evaluator<B> {
             }
 
             Copy(type_id, out, inp) => {
-                let in_wire = get::<B>(scope, *type_id, *inp)?;
-                let out_wire = backend.copy(type_id, in_wire)?;
-                set::<B>(scope, *type_id, *out, out_wire)?;
+                let inp_iter = inp.iter().flat_map(|wire_range| {
+                    wire_range.first_id ..= wire_range.last_id
+                });
+                let out_iter = out.first_id ..= out.last_id;
+                for (out_wire_id, inp_wire_id) in out_iter.zip(inp_iter) {
+                    let in_wire = get::<B>(scope, *type_id, inp_wire_id)?;
+                    let out_wire = backend.copy(type_id, in_wire)?;
+                    set::<B>(scope, *type_id, out_wire_id, out_wire)?;
+                }
             }
 
             Add(type_id, out, left, right) => {
@@ -405,26 +411,31 @@ impl<B: ZKBackend> Evaluator<B> {
             }
 
             Public(type_id, out) => {
-                let mut val = Self::get_input_values(inputs, type_id, 1, true)?;
-                set_public_input(backend, scope, *type_id, *out, val.pop().unwrap())?;
+                for out_wire_id in out.first_id ..= out.last_id {
+                    let mut val = Self::get_input_values(inputs, type_id, 1, true)?;
+                    set_public_input(backend, scope, *type_id, out_wire_id, val.pop().unwrap())?;
+                }
             }
 
             Private(type_id, out) => {
-                let val_result = Self::get_input_values(inputs, type_id, 1, false);
-                match val_result {
-                    Ok(mut values) => {
-                        set_private_input(
-                            backend,
-                            scope,
-                            *type_id,
-                            *out,
-                            Some(values.pop().unwrap()),
-                        )?;
-                    }
-                    // It is not always possible to retrieve private values (e.g. for verifier).
-                    // It is managed in `set_private_input` by a value input equal to `None`.
-                    Err(_) => set_private_input(backend, scope, *type_id, *out, None)?,
-                };
+                for out_wire_id in out.first_id ..= out.last_id {
+                    let val_result = Self::get_input_values(inputs, type_id, 1, false);
+                    match val_result {
+                        Ok(mut values) => {
+                            set_private_input(
+                                backend,
+                                scope,
+                                *type_id,
+                                out_wire_id,
+                                Some(values.pop().unwrap()),
+                            )?;
+                        }
+                        // It is not always possible to retrieve private values (e.g. for
+                        // verifier).  It is managed in `set_private_input` by a value input equal
+                        // to `None`.
+                        Err(_) => set_private_input(backend, scope, *type_id, out_wire_id, None)?,
+                    };
+                }
             }
 
             New(type_id, first, last) => {
@@ -444,6 +455,7 @@ impl<B: ZKBackend> Evaluator<B> {
                 in_type_id,
                 in_first_id,
                 in_last_id,
+                modulus,
             ) => {
                 // Check ranges are correct (first <= last)
                 if out_first_id > out_last_id {
@@ -455,6 +467,12 @@ impl<B: ZKBackend> Evaluator<B> {
                 if in_first_id > in_last_id {
                     return Err(format!(
                         "Evaluation of a Convert gate:: in_last_id ({}) must be greater than in_first_id ({}).", in_last_id, in_first_id
+                    )
+                        .into());
+                }
+                if *modulus {
+                    return Err(format!(
+                        "Evaluation of a Convert gate: modulus = true is not supported yet"
                     )
                         .into());
                 }
@@ -1124,6 +1142,7 @@ fn test_evaluator_wrong_result() {
 fn test_evaluator_conversion() {
     use crate::consumers::evaluator::Evaluator;
     use crate::structs::conversion::Conversion;
+    use crate::structs::wirerange::WireRange;
     use crate::structs::IR_VERSION;
 
     let public_inputs = PublicInputs {
@@ -1142,15 +1161,15 @@ fn test_evaluator_conversion() {
         types: vec![Type::Field(vec![7]), Type::Field(vec![101])],
         conversions: vec![Conversion::new(Count::new(0, 2), Count::new(1, 2))],
         directives: vec![
-            Directive::Gate(Gate::Private(1, 0)), // 2
-            Directive::Gate(Gate::Private(1, 1)), // 81
+            Directive::Gate(Gate::Private(1, WireRange::singleton(0))), // 2
+            Directive::Gate(Gate::Private(1, WireRange::singleton(1))), // 81
             // (2*101 + 81) mod 7^2 = 38
             // 38 = 5*7 + 3
-            Directive::Gate(Gate::Convert(0, 0, 1, 1, 0, 1)),
-            Directive::Gate(Gate::Public(0, 2)),    // 6
+            Directive::Gate(Gate::Convert(0, 0, 1, 1, 0, 1, false)),
+            Directive::Gate(Gate::Public(0, WireRange::singleton(2))),    // 6
             Directive::Gate(Gate::Add(0, 3, 0, 2)), // 5 + 2 = 0 mod 7
             Directive::Gate(Gate::AssertZero(0, 3)),
-            Directive::Gate(Gate::Public(0, 4)),    // 2
+            Directive::Gate(Gate::Public(0, WireRange::singleton(4))),    // 2
             Directive::Gate(Gate::Add(0, 5, 1, 4)), // 3 + 4 = 0 mod 7
             Directive::Gate(Gate::AssertZero(0, 5)),
             Directive::Gate(Gate::Delete(0, 0, 5)),
@@ -1182,16 +1201,16 @@ fn test_evaluator_conversion() {
         types: vec![Type::Field(vec![7]), Type::Field(vec![101])],
         conversions: vec![Conversion::new(Count::new(0, 2), Count::new(1, 2))],
         directives: vec![
-            Directive::Gate(Gate::Private(1, 0)), // 2
-            Directive::Gate(Gate::Private(1, 1)), // 81
+            Directive::Gate(Gate::Private(1, WireRange::singleton(0))), // 2
+            Directive::Gate(Gate::Private(1, WireRange::singleton(1))), // 81
             // (2*101 + 81) mod 7^2 = 38
             // 38 = 5*7 + 3
             // Violation: in_ids is empty (in_first_id > in_last_id)
-            Directive::Gate(Gate::Convert(0, 0, 1, 1, 1, 0)),
-            Directive::Gate(Gate::Public(0, 2)),    // 6
+            Directive::Gate(Gate::Convert(0, 0, 1, 1, 1, 0, false)),
+            Directive::Gate(Gate::Public(0, WireRange::singleton(2))),    // 6
             Directive::Gate(Gate::Add(0, 3, 0, 2)), // 5 + 2 = 0 mod 7
             Directive::Gate(Gate::AssertZero(0, 3)),
-            Directive::Gate(Gate::Public(0, 4)),    // 2
+            Directive::Gate(Gate::Public(0, WireRange::singleton(4))),    // 2
             Directive::Gate(Gate::Add(0, 5, 1, 4)), // 3 + 4 = 0 mod 7
             Directive::Gate(Gate::AssertZero(0, 5)),
             Directive::Gate(Gate::Delete(0, 0, 5)),
@@ -1239,10 +1258,10 @@ fn test_evaluator_with_functions_with_several_input_output_types() {
         directives: vec![
             Directive::Gate(Gate::New(0, 0, 1)),
             Directive::Gate(Gate::New(1, 0, 1)),
-            Directive::Gate(Gate::Public(0, 0)),
-            Directive::Gate(Gate::Public(0, 1)),
-            Directive::Gate(Gate::Private(1, 0)),
-            Directive::Gate(Gate::Private(1, 1)),
+            Directive::Gate(Gate::Public(0, WireRange::singleton(0))),
+            Directive::Gate(Gate::Public(0, WireRange::singleton(1))),
+            Directive::Gate(Gate::Private(1, WireRange::singleton(0))),
+            Directive::Gate(Gate::Private(1, WireRange::singleton(1))),
             Directive::Function(Function::new(
                 "custom".to_string(),
                 vec![Count::new(0, 1), Count::new(1, 1)],
@@ -1251,11 +1270,11 @@ fn test_evaluator_with_functions_with_several_input_output_types() {
                     // 3 + 5 = 1 mod 7
                     Gate::Add(0, 3, 1, 2),
                     // 1 mod 7 -> 1 mod 101
-                    Gate::Convert(1, 0, 0, 0, 3, 3),
+                    Gate::Convert(1, 0, 0, 0, 3, 3, false),
                     // 10 + 20 = 30 mod 101
                     Gate::Add(1, 3, 1, 2),
                     // 30 mod 101 -> 2 mod 7
-                    Gate::Convert(0, 0, 0, 1, 3, 3),
+                    Gate::Convert(0, 0, 0, 1, 3, 3, false),
                 ]),
             )),
             Directive::Gate(Gate::Call(
@@ -1263,10 +1282,10 @@ fn test_evaluator_with_functions_with_several_input_output_types() {
                 vec![WireRange::new(2, 2), WireRange::new(2, 2)],
                 vec![WireRange::new(0, 1), WireRange::new(0, 1)],
             )),
-            Directive::Gate(Gate::Public(0, 3)),
+            Directive::Gate(Gate::Public(0, WireRange::singleton(3))),
             Directive::Gate(Gate::Add(0, 4, 2, 3)),
             Directive::Gate(Gate::AssertZero(0, 4)),
-            Directive::Gate(Gate::Private(1, 3)),
+            Directive::Gate(Gate::Private(1, WireRange::singleton(3))),
             Directive::Gate(Gate::Add(1, 4, 2, 3)),
             Directive::Gate(Gate::AssertZero(1, 4)),
             Directive::Gate(Gate::Delete(0, 0, 4)),

@@ -38,7 +38,7 @@ impl Count {
     }
 
     /// Import a vector of binary Count into a Rust vector of Count declarations.
-    pub fn try_from_vector(g_counts: &[generated::Count]) -> Result<Vec<Count>> {
+    pub fn try_from_vector(g_counts: Vector<generated::Count>) -> Result<Vec<Count>> {
         g_counts
             .iter()
             .map(|g_count| Count::try_from(*g_count))

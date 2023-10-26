@@ -16,7 +16,7 @@ impl<'a> TryFrom<&'a [u8]> for Message {
     type Error = Box<dyn Error>;
 
     fn try_from(buffer: &'a [u8]) -> Result<Self> {
-        let msg = generated::get_size_prefixed_root_as_root(buffer);
+        let msg = generated::size_prefixed_root_as_root(buffer)?;
 
         Ok(match msg.message_type() {
             generated::Message::PublicInputs => {
@@ -31,7 +31,7 @@ impl<'a> TryFrom<&'a [u8]> for Message {
                 let fb_relation = msg.message_as_relation().unwrap();
                 Message::Relation(Relation::try_from(fb_relation)?)
             }
-            generated::Message::NONE => return Err("Invalid message type".into()),
+            _ => return Err("Invalid message type".into()),
         })
     }
 }

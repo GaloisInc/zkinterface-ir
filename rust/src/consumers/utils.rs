@@ -4,11 +4,14 @@ use std::io::Read;
 
 // Read a flatbuffers size prefix (4 bytes, little-endian). Size including the prefix.
 pub fn read_size_prefix(buf: &[u8]) -> usize {
-    if buf.len() < SIZE_UOFFSET {
-        return 0;
+    unsafe {
+        if buf.len() < SIZE_UOFFSET {
+            return 0;
+        }
+        // Requires `buf.len() >= size_of::<UOffsetT>()`
+        let size = read_scalar_at::<UOffsetT>(buf, 0) as usize;
+        SIZE_UOFFSET + size
     }
-    let size = read_scalar_at::<UOffsetT>(buf, 0) as usize;
-    SIZE_UOFFSET + size
 }
 
 pub fn split_messages(mut buf: &[u8]) -> Vec<&[u8]> {
