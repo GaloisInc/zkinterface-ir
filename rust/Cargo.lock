@@ -597,7 +597,7 @@ dependencies = [
 
 [[package]]
 name = "zki_sieve"
-version = "4.0.1"
+version = "5.0.0"
 dependencies = [
  "colored",
  "flatbuffers 23.1.21",

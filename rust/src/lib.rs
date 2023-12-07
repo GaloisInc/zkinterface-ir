@@ -49,3 +49,15 @@ pub use structs::{
 
 /// Common definition of Result with generic errors.
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+/// Common verifier options for parsing flatbuffer messages.
+const FLATBUFFER_VERIFIER_OPTIONS: flatbuffers::VerifierOptions = flatbuffers::VerifierOptions {
+    // The default limit of 1_000_000 is too low and triggers a `TooManyTables` error when parsing
+    // very large relations.
+    max_tables: 1_000_000_000,
+    // The rest of these options are set to their default values.  Unfortunately, we can't use
+    // `..Default::default()` in a const initializer context.
+    max_depth: 64,
+    max_apparent_size: 1 << 31,
+    ignore_missing_null_terminator: false,
+};

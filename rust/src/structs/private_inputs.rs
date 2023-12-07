@@ -39,9 +39,12 @@ impl<'a> TryFrom<&'a [u8]> for PrivateInputs {
 
     fn try_from(buffer: &'a [u8]) -> Result<PrivateInputs> {
         PrivateInputs::try_from(
-            generated::size_prefixed_root_as_root(buffer)?
-                .message_as_private_inputs()
-                .ok_or("Not a PrivateInputs message.")?,
+            generated::size_prefixed_root_as_root_with_opts(
+                &crate::FLATBUFFER_VERIFIER_OPTIONS,
+                buffer,
+            )?
+            .message_as_private_inputs()
+            .ok_or("Not a PrivateInputs message.")?,
         )
     }
 }
